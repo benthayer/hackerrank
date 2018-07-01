@@ -1,0 +1,7 @@
+Here is my solution to the "Spies, Revised" problem on hackerrank
+https://www.hackerrank.com/challenges/spies-revised/problem
+I currently have not attained the maximum score of 99.9 for n=999, but I've acheived a maximum score of 10.3 for n=103, putting me in 100th place overall.
+
+I intend on adding threading and launching my code on a powerful AWS instance to solve the problem for n=999. I will also publish my solution for n=1001 since that is above the threshold for which scores are processed.
+
+My solution uses backtracking with several speedups. In order to acheive backtracking, I maintain a state as can be seen in the Solver class. It keeps track of what is currently being tested and how to backtrack if a path is found to be a dead end. When expanding the next layer, I always choose the column that has the fewest possibilities, which reduces the branching factor, and is closest to the center, which blocks the maximum number of spaces available for future expansions. I also sort the list of rows in order of closest to center to furthes before testing for the same reason. When invalidating certain spots, I maintain a list of which spots have been invalidated, so that they can be revalidated later on. I also only iterate though the columns that have not yet been expanded since a column that has been expanded will not be considered again for expansion.
