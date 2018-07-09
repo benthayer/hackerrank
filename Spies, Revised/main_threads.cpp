@@ -4,24 +4,49 @@
 #include <vector>
 #include <set>
 #include <algorithm>
-#include <chrono>
+#include <thread>
+#include <mutex>
+#include <utility>
+
 
 using namespace std;
-using namespace std::chrono;
+
+class Solver;
+
+class SolutionMaster {
+    int n;
+    int nThreads;
+    mutex m;
+
+    vector<Solver> solvers;
+    int nextSolver = 0;
+    vector<thread> active;
+    vector<int> solution;
+
+    public:
+    SolutionMaster(int n, int t);
+    void enqueue(Solver* s);
+    void markSolved(Solver* s);
+    void startThread();
+    vector<int> getSolution();
+};
 
 class Solver {
     public:
+    int currentLayer;
+    int n;
+
     bool** boardAvailability;
     vector<pair<int, int>>* invalidations;
     set<int>* freeSpacesInColumns;
     int* layerColumns;
     int* layerRows;
     set<int> columnsLeft;
-    int currentLayer;
-    int n;
-    double duration;
-    clock_t start;
-    Solver(int n):n(n),duration() {
+
+    SolutionMaster* master;
+    bool solutionFound = false;
+
+    Solver(int n, SolutionMaster* m):n(n),master(m) {
 
         boardAvailability = new bool*[n];
         for (int i = 0; i < n; i++) {
@@ -51,12 +76,47 @@ class Solver {
         columnsLeft.erase(layerColumns[0]);
     }
 
-    void tStart() {
-        start = clock();
-    }
+    Solver(Solver* s) {
+        n = s->n;
+        master = s->master;
+        currentLayer = s->currentLayer;
 
-    void tStop() {
-        duration += clock() - start;
+        boardAvailability = new bool*[n];
+        for (int i = 0; i < n; i++) {
+            boardAvailability[i] = new bool[n];
+            for (int j = 0; j < n; j++) {
+                boardAvailability[i][j] = s->boardAvailability[i][j];
+            }
+        }
+
+        invalidations = new vector<pair<int, int>>[n];
+        for (int i = 0; i < currentLayer; i++) {
+            for (int j = 0; j < s->invalidations[i].size(); j++) {
+                invalidations[i].push_back(s->invalidations[i][j]);
+            }
+        }
+
+        freeSpacesInColumns = new set<int>[n];
+        for (int i = 0; i < n; i++) {
+            for (auto row: s->freeSpacesInColumns[i]) {
+                freeSpacesInColumns[i].insert(row);
+            }
+        }
+
+        layerColumns = new int[n];
+        for (int i = 0; i <= currentLayer; i++) {
+            layerColumns[i] = s->layerColumns[i];
+        }
+        
+        layerRows = new int[n];
+        for (int i = 0; i < currentLayer; i++) {
+            layerRows[i] = s->layerRows[i];
+        }
+
+        for (auto col: s->columnsLeft) {
+            columnsLeft.insert(col);
+        }
+
     }
 
     int row() {
@@ -156,27 +216,20 @@ class Solver {
         invalidations[currentLayer].clear();
     }
 
-    bool solve() {
-        // cout << "Solve called" << endl;
-        /*
-        Rules:
-        None can share the same row/column
-        None can see each other diagonally
-        No 3 can be in any line
-        */
-    
-        // naive first
-        // create data structure that enables and disables available spaces as needed
+    bool solve(bool threadChildren) {
 
+        if (solutionFound) {
+            return false;
+        }
 
         vector<int> freeSpaces(freeSpacesInColumns[col()].begin(), freeSpacesInColumns[col()].end());
         sort(freeSpaces.begin(), freeSpaces.end(), [=] (int a, int b) {
             return abs(a-n/2) < abs(b-n/2);
         });
 
-        for (vector<int>::iterator spy = freeSpaces.begin(); spy != freeSpaces.end(); spy++) {
+        for (int i = 0; i < freeSpaces.size(); i++) {
             // invalidate everything
-            layerRows[currentLayer] = *spy;
+            layerRows[currentLayer] = freeSpaces[i];
 
             if (currentLayer == n-1) {
                 return true;
@@ -205,9 +258,13 @@ class Solver {
                 // expand next column
                 layerColumns[++currentLayer] = minCol;
                 columnsLeft.erase(minCol);
-                
-                if (solve()) {
-                    return true;
+
+                if (threadChildren) {
+                    master->enqueue(this);
+                } else {
+                    if (solve(false)) {
+                        return true;
+                    }
                 }
                 columnsLeft.insert(minCol);
                 currentLayer--;
@@ -215,8 +272,20 @@ class Solver {
             }
         }
 
-
         return false;
+    }
+
+    bool solve() {
+        return solve(false);
+    }
+
+    void solveAndNotify() {
+        if (solve()) {
+            master->markSolved(this);
+        }
+        master->startThread();
+        // cout << "exiting thread " << this << endl;
+
     }
 
     vector<int> getSolution() {
@@ -228,12 +297,56 @@ class Solver {
     }
 };
 
-string solutionStr(Solver solver, bool solved) {
-    string ss = to_string(solver.n) + "\n";
-    if (!solved) {
+
+SolutionMaster::SolutionMaster(int n, int t):n(n),nThreads(t) {
+    solvers.reserve(n*n / 2);
+    active.reserve(n*n / 2);
+}
+
+void SolutionMaster::enqueue(Solver* old) {
+    Solver s(old);
+    solvers.push_back(s);
+}
+
+void SolutionMaster::markSolved(Solver* s) {
+    solution = s->getSolution();
+    for (int i = 0; i < solvers.size(); i++) {
+        solvers[i].solutionFound = true;
+    }
+}
+
+void SolutionMaster::startThread() {
+    m.lock();
+    if (nextSolver < solvers.size()) {
+        thread t(&Solver::solveAndNotify, &solvers[nextSolver]);
+        active.push_back(move(t));
+        nextSolver++;
+    }
+    m.unlock();
+}
+
+vector<int> SolutionMaster::getSolution() {
+    // Start threads here
+    Solver s(n, this);
+    s.solve(true); // Enqueues all solvers (n^2/2)
+
+    for (int i = 0; i < nThreads; i++) {
+        startThread();
+    }
+    
+    for (int i = 0; i < active.size(); i++) {
+        active[i].join();
+    }
+
+    return solution;
+}
+
+string solutionStr(int n, vector<int> solution) {
+    string ss = to_string(n) + "\n";
+    if (solution.empty()) {
         return ss + "NO SOLUTION FOUND";
     }
-    vector<int> solution = solver.getSolution();
+
     ss += to_string(solution[0] + 1);
     for (int i = 1; i < solution.size(); i++) {
         ss += " " + to_string(solution[i] + 1);
@@ -242,26 +355,24 @@ string solutionStr(Solver solver, bool solved) {
 }
 
 int main() {
+    int nThreads = 8;
     ofstream file;
-    // vector<int> ns = {113, 119, 129, 153, 155, 157, 159, 203,213};
-    // for (int i = 0; i < ns.size(); i++) {
-        // int n = ns[i];
-    for (int n = 1; n < 1000; n+=2) {
+
+    vector<int> ns = {155, 157, 159, 203, 213, 353, 503, 505, 513, 999, 1001};
+
+    for (int i = 0; i < ns.size(); i++) {
+        int n = ns[i];
+    // for (int n = 1; n < 1000; n += 2) {
         cout << "Solving for " << n << endl;
-        Solver solver(n);
-        clock_t start = clock();
-        bool solved = solver.solve();
-        double time = clock() - start;
-        // cout << solver.duration << "s of " << time << "s spent calculating columns (" << 100 * solver.duration / time << "%)" << endl;
+        SolutionMaster m(n, nThreads);
+        vector<int> solution = m.getSolution();
+
         string ss;
-        ss = solutionStr(solver, solved);
-        file.open("output\\" + to_string(n) + ".txt");
+        ss = solutionStr(n, solution);
+        file.open("output/" + to_string(n) + ".txt");
         file << ss;
         file.close();
         cout << ss << endl;
-        if (n==11 && !solved) {
-            cout << "11 not solved" << endl;
-        }
     }
     
     return 0;
