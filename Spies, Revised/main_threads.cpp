@@ -58,6 +58,10 @@ class Solver {
         
 
         invalidations = new vector<pair<int, int>>[n]; // spots layer has invalidated
+        for (int i = 0; i < n; i++) {
+            invalidations[i].reserve(n*5);
+        }
+
         freeSpacesInColumns = new set<int>[n]; // available spots in the column
 
         for (int i = 0; i < n; i++) {
@@ -90,6 +94,9 @@ class Solver {
         }
 
         invalidations = new vector<pair<int, int>>[n];
+        for (int i = 0; i < n; i++) {
+            invalidations[i].reserve(n*5);
+        }
         for (int i = 0; i < currentLayer; i++) {
             for (int j = 0; j < s->invalidations[i].size(); j++) {
                 invalidations[i].push_back(s->invalidations[i][j]);
@@ -358,7 +365,7 @@ int main() {
     int nThreads = 8;
     ofstream file;
 
-    vector<int> ns = {155, 157, 159, 203, 213, 353, 503, 505, 513, 999, 1001};
+    vector<int> ns = {353, 503, 505, 513, 999, 1001};
 
     for (int i = 0; i < ns.size(); i++) {
         int n = ns[i];
