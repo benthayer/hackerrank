@@ -7,9 +7,10 @@
 #include <thread>
 #include <mutex>
 #include <utility>
-
+#include <chrono>
 
 using namespace std;
+using namespace std::chrono;
 
 class Solver;
 
@@ -33,26 +34,30 @@ class SolutionMaster {
 
 class Solver {
     public:
-    int currentLayer;
     int n;
 
-    bool** boardAvailability;
+    bool** spotAvailable;
     vector<pair<int, int>>* invalidations;
-    set<int>* freeSpacesInColumns;
+    int* freeSpaceInColumns;
+    bool* columnsLeft;
+
+    // solution information
     int* layerColumns;
     int* layerRows;
-    set<int> columnsLeft;
+    int currentLayer;
+
+    vector<pair<int, int>> slopes;
 
     SolutionMaster* master;
     bool solutionFound = false;
 
     Solver(int n, SolutionMaster* m):n(n),master(m) {
 
-        boardAvailability = new bool*[n];
+        spotAvailable = new bool*[n];
         for (int i = 0; i < n; i++) {
-            boardAvailability[i] = new bool[n];
+            spotAvailable[i] = new bool[n];
             for (int j = 0; j < n; j++) {
-                boardAvailability[i][j] = true;
+                spotAvailable[i][j] = true;
             }
         }
         
@@ -62,13 +67,14 @@ class Solver {
             invalidations[i].reserve(n*5);
         }
 
-        freeSpacesInColumns = new set<int>[n]; // available spots in the column
+        freeSpaceInColumns = new int[n];
+        columnsLeft = new bool[n];
 
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
-                freeSpacesInColumns[i].insert(j);
+                freeSpaceInColumns[i] = n;
             }
-            columnsLeft.insert(i);
+            columnsLeft[i] = true;
         }
 
 
@@ -77,7 +83,9 @@ class Solver {
         currentLayer = 0; // the current layer
         layerColumns[0] = n/2; // maximizes the number of blockages in the iniitial selection
         
-        columnsLeft.erase(layerColumns[0]);
+        columnsLeft[layerColumns[0]] = false;
+
+        slopes.reserve(n);
     }
 
     Solver(Solver* s) {
@@ -85,11 +93,11 @@ class Solver {
         master = s->master;
         currentLayer = s->currentLayer;
 
-        boardAvailability = new bool*[n];
+        spotAvailable = new bool*[n];
         for (int i = 0; i < n; i++) {
-            boardAvailability[i] = new bool[n];
+            spotAvailable[i] = new bool[n];
             for (int j = 0; j < n; j++) {
-                boardAvailability[i][j] = s->boardAvailability[i][j];
+                spotAvailable[i][j] = s->spotAvailable[i][j];
             }
         }
 
@@ -97,17 +105,18 @@ class Solver {
         for (int i = 0; i < n; i++) {
             invalidations[i].reserve(n*5);
         }
+
         for (int i = 0; i < currentLayer; i++) {
             for (int j = 0; j < s->invalidations[i].size(); j++) {
                 invalidations[i].push_back(s->invalidations[i][j]);
             }
         }
 
-        freeSpacesInColumns = new set<int>[n];
+        freeSpaceInColumns = new int[n];
+        columnsLeft = new bool[n];
         for (int i = 0; i < n; i++) {
-            for (auto row: s->freeSpacesInColumns[i]) {
-                freeSpacesInColumns[i].insert(row);
-            }
+            freeSpaceInColumns[i] = s->freeSpaceInColumns[i];
+            columnsLeft[i] = s->columnsLeft[i];
         }
 
         layerColumns = new int[n];
@@ -120,10 +129,7 @@ class Solver {
             layerRows[i] = s->layerRows[i];
         }
 
-        for (auto col: s->columnsLeft) {
-            columnsLeft.insert(col);
-        }
-
+        slopes.reserve(n);
     }
 
     int row() {
@@ -135,12 +141,12 @@ class Solver {
     }
 
     void invalidateSpot(int spotRow, int spotCol) {
-        if (!boardAvailability[spotRow][spotCol]) {
+        if (!spotAvailable[spotRow][spotCol]) {
             return;
         }
-        boardAvailability[spotRow][spotCol] = false;
+        spotAvailable[spotRow][spotCol] = false;
         invalidations[currentLayer].push_back(make_pair(spotRow, spotCol));
-        freeSpacesInColumns[spotCol].erase(spotRow);
+        freeSpaceInColumns[spotCol] -= 1;
     }
 
     void invalidate_simple() {
@@ -181,30 +187,38 @@ class Solver {
         }
     }
 
-    void invalidate() {
-        vector<pair<int, int>> slopes;
+    void invalidate_columns() {
+        int row = this->row();
+        int col = this->col();
+        
+        slopes.clear();
+
         for (int i = 0; i < currentLayer; i++) {
-            int gcd = __gcd(row() - layerRows[i], col() - layerColumns[i]);
-            slopes.push_back(make_pair((row() - layerRows[i])/gcd, (col() - layerColumns[i])/gcd));
+            int gcd = __gcd(row - layerRows[i], col - layerColumns[i]);
+            slopes.push_back(make_pair((row - layerRows[i])/gcd, (col - layerColumns[i])/gcd));
         }
-        for (auto aCol : columnsLeft) {
+
+        for (int aCol = 0; aCol < n; aCol++) {
+            if (!columnsLeft[aCol]) {
+                continue;
+            }
             // row
             // column (doesn't matter)
             // diagonal
             // lines * calculate slopes first, then check for each col
-            invalidateSpot(row(), aCol); // row
+            invalidateSpot(row, aCol); // row
 
-            int diff = abs(col() - aCol);
-            if (row() + diff < n) {
-                invalidateSpot(row() + diff, aCol);
+            int diff = abs(col - aCol);
+            if (row + diff < n) {
+                invalidateSpot(row + diff, aCol);
             }
-            if (row() - diff >= 0) {
-                invalidateSpot(row() - diff, aCol);
+            if (row - diff >= 0) {
+                invalidateSpot(row - diff, aCol);
             }
             for (int i = 0; i < slopes.size(); i++) {
-                int numSteps = (aCol - col())/slopes[i].second;
-                if (numSteps*slopes[i].second == (aCol - col())) {
-                    int collisonRow = row() + slopes[i].first * numSteps;
+                int numSteps = (aCol - col)/slopes[i].second;
+                if (numSteps*slopes[i].second == (aCol - col)) {
+                    int collisonRow = row+ slopes[i].first * numSteps;
                     if (0 <= collisonRow && collisonRow < n) {
                         invalidateSpot(collisonRow, aCol);
                     }
@@ -213,12 +227,16 @@ class Solver {
         }
     }
 
+    void invalidate() {
+        invalidate_columns();
+    }
+
     void revalidate() {
         for (int i = 0; i < invalidations[currentLayer].size(); i++) {
             int spotRow = invalidations[currentLayer][i].first;
             int spotCol = invalidations[currentLayer][i].second;
-            boardAvailability[spotRow][spotCol] = true;
-            freeSpacesInColumns[spotCol].insert(spotRow);
+            spotAvailable[spotRow][spotCol] = true;
+            freeSpaceInColumns[spotCol] += 1;
         }
         invalidations[currentLayer].clear();
     }
@@ -229,32 +247,35 @@ class Solver {
             return false;
         }
 
-        vector<int> freeSpaces(freeSpacesInColumns[col()].begin(), freeSpacesInColumns[col()].end());
-        sort(freeSpaces.begin(), freeSpaces.end(), [=] (int a, int b) {
-            return abs(a-n/2) < abs(b-n/2);
-        });
+        int col = this->col();
+        int row = n/2; // Start in the middle then oscillate out
+        int direction = 1;
+        for (int delta = 0; delta < n; delta++) {
+            row += direction * delta;
+            direction *= -1;
 
-        for (int i = 0; i < freeSpaces.size(); i++) {
+            if (!spotAvailable[row][col]) {
+                continue;
+            }
             // invalidate everything
-            layerRows[currentLayer] = freeSpaces[i];
+            layerRows[currentLayer] = row;
 
             if (currentLayer == n-1) {
                 return true;
             }
 
-            invalidate_simple();
-            
-            // check for next column
-            set<int>::iterator col = columnsLeft.begin();
-            int minCol = *col; // could keep track of vector of all columns with the smallest then choose the centermost
-            int minSize = freeSpacesInColumns[*col].size();
-            int minCenter = abs(n/2 - minCol);
-            col++;
-            for ( ; col != columnsLeft.end(); col++) {
-                // cout << "Column " << *col << ": " << freeSpacesInColumns[*col].size() << endl;
-                if (freeSpacesInColumns[*col].size() < minSize || (freeSpacesInColumns[*col].size() == minSize && abs(n/2 - *col) < minCenter)) {
-                    minCol = *col;
-                    minSize = freeSpacesInColumns[*col].size();
+            invalidate();
+
+            int minCol = 0;
+            while (!columnsLeft[minCol])
+                minCol++;
+            int minSize = freeSpaceInColumns[0];
+            int minDist = abs(n/2 - minCol);
+            for (int aCol = 1; aCol < n; aCol++) {
+                if (columnsLeft[aCol] && (freeSpaceInColumns[aCol] < minSize || (freeSpaceInColumns[aCol] == minSize && abs(n/2 - aCol) < minDist))) {
+                    minCol = aCol;
+                    minSize = freeSpaceInColumns[aCol];
+                    minDist = abs(n/2 - aCol);
                 }
             }
             
@@ -264,7 +285,7 @@ class Solver {
             } else {
                 // expand next column
                 layerColumns[++currentLayer] = minCol;
-                columnsLeft.erase(minCol);
+                columnsLeft[minCol] = false;
 
                 if (threadChildren) {
                     master->enqueue(this);
@@ -273,7 +294,7 @@ class Solver {
                         return true;
                     }
                 }
-                columnsLeft.insert(minCol);
+                columnsLeft[minCol] = true;
                 currentLayer--;
                 revalidate();
             }
@@ -291,8 +312,6 @@ class Solver {
             master->markSolved(this);
         }
         master->startThread();
-        // cout << "exiting thread " << this << endl;
-
     }
 
     vector<int> getSolution() {
@@ -365,13 +384,14 @@ int main() {
     int nThreads = 8;
     ofstream file;
 
-    vector<int> ns = {353, 503, 505, 513, 999, 1001};
+    // vector<int> ns = {353, 503, 505, 513, 999, 1001};
 
-    for (int i = 0; i < ns.size(); i++) {
-        int n = ns[i];
-    // for (int n = 1; n < 1000; n += 2) {
+    // for (int i = 0; i < ns.size(); i++) {
+        // int n = ns[i];
+    for (int n = 1; n < 1000; n += 2) {
         cout << "Solving for " << n << endl;
         SolutionMaster m(n, nThreads);
+
         vector<int> solution = m.getSolution();
 
         string ss;
