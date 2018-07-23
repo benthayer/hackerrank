@@ -25,6 +25,8 @@ class SolutionMaster {
     vector<int> solution;
 
     public:
+    int maxDepth = 0;
+
     SolutionMaster(int n, int t);
     void enqueue(Solver* s);
     void markSolved(Solver* s);
@@ -247,6 +249,12 @@ class Solver {
             return false;
         }
 
+        if (currentLayer > master->maxDepth) {
+            master->maxDepth = currentLayer;
+            cout << "Acheived new maxDepth of " << master->maxDepth << endl;
+            cout << getSolutionString() << endl;
+        }
+
         int col = this->col();
         int row = n/2; // Start in the middle then oscillate out
         int direction = 1;
@@ -317,9 +325,21 @@ class Solver {
     vector<int> getSolution() {
         vector<int> sol(n);
         for (int i = 0; i < n; i++) {
+            sol[i] = n*2-1;
+        }
+        for (int i = 0; i < n; i++) {
             sol[layerColumns[i]] = layerRows[i];
         }
         return sol;
+    }
+
+    string getSolutionString() {
+        vector<int> solution = getSolution();
+        string ss = to_string(solution[0] + 1);
+        for (int i = 1; i < solution.size(); i++) {
+            ss += " " + to_string(solution[i] + 1);
+        }
+        return ss;
     }
 };
 
@@ -369,7 +389,7 @@ vector<int> SolutionMaster::getSolution() {
 
 string solutionStr(int n, vector<int> solution) {
     string ss = to_string(n) + "\n";
-    if (solution.empty()) {
+    if (solution.empty()) { // TODO Crashes because it solution is never empty, only incomplete
         return ss + "NO SOLUTION FOUND";
     }
 
@@ -385,10 +405,11 @@ int main() {
     ofstream file;
 
     // vector<int> ns = {353, 503, 505, 513, 999, 1001};
+    vector<int> ns = {999, 1001};
 
-    // for (int i = 0; i < ns.size(); i++) {
-        // int n = ns[i];
-    for (int n = 1; n < 1000; n += 2) {
+    for (int i = 0; i < ns.size(); i++) {
+        int n = ns[i];
+    // for (int n = 1; n < 1000; n += 2) {
         cout << "Solving for " << n << endl;
         SolutionMaster m(n, nThreads);
 

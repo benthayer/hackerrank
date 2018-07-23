@@ -477,11 +477,11 @@ int main() {
     int nThreads = 8;
     ofstream file;
 
-    vector<int> ns = {353, 503, 505, 513, 999, 1001};
+    // vector<int> ns = {353, 503, 505, 513, 999, 1001};
 
-    for (int i = 0; i < ns.size(); i++) {
-        int n = ns[i];
-    // for (int n = 11; n < 1000; n += 2) {
+    // for (int i = 0; i < ns.size(); i++) {
+        // int n = ns[i];
+    for (int n = 3; n < 1000; n += 2) {
         cout << "Solving for " << n << endl;
         SolutionMaster m(n, nThreads);
 

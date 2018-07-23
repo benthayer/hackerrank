@@ -259,10 +259,12 @@ string solutionStr(Solver solver, bool solved) {
 
 int main() {
     ofstream file;
-    // vector<int> ns = {113, 119, 129, 153, 155, 157, 159, 203,213};
-    // for (int i = 0; i < ns.size(); i++) {
-        // int n = ns[i];
-    for (int n = 1; n < 50; n+=2) {
+    
+    vector<int> ns = {353, 503, 505, 513, 999, 1001};
+
+    for (int i = 0; i < ns.size(); i++) {
+        int n = ns[i];
+    // for (int n = 1; n < 50; n+=2) {
         cout << "Solving for " << n << endl;
         Solver solver(n);
 
